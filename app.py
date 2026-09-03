@@ -28,7 +28,35 @@ Run with:
     streamlit run app.py
 """
 
+import os
 import streamlit as st
+
+# --- Secrets bootstrap for cloud deployment ---
+# Locally, google-ads.yaml is a real file on disk (never committed to
+# GitHub — see .gitignore) and OPENAI_API_KEY is set as an environment
+# variable. On Streamlit Community Cloud, neither of those exist by
+# default; instead, credentials are entered securely via the app's
+# "Secrets" settings in the Streamlit dashboard (TOML format), and
+# Streamlit exposes them through st.secrets at runtime.
+#
+# This block writes google-ads.yaml from st.secrets if it doesn't
+# already exist on disk, and sets OPENAI_API_KEY as an environment
+# variable from st.secrets if it isn't already set. This means the
+# exact same codebase runs unchanged whether it's on your local machine
+# or deployed — nothing below this block needs to know which environment
+# it's in.
+if not os.path.exists("google-ads.yaml") and "google_ads" in st.secrets:
+    ga = st.secrets["google_ads"]
+    with open("google-ads.yaml", "w") as f:
+        f.write(f"""developer_token: "{ga['developer_token']}"
+client_id: "{ga['client_id']}"
+client_secret: "{ga['client_secret']}"
+refresh_token: "{ga['refresh_token']}"
+login_customer_id: "{ga['login_customer_id']}"
+""")
+
+if "OPENAI_API_KEY" not in os.environ and "OPENAI_API_KEY" in st.secrets:
+    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
 
 from google_ads.campaign_data import get_campaign_data_with_comparison
 from google_ads.ad_data import get_ad_data
