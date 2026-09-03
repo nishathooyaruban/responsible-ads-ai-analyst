@@ -1,0 +1,7 @@
+google-ads
+langchain
+langchain-openai
+langchain-core
+langchain-chroma
+chromadb
+streamlit

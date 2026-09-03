@@ -1,0 +1,22 @@
+# Google Ads credentials — NEVER commit these
+google-ads.yaml
+client_secret.json
+
+# Environment variables / API keys
+.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+*.egg-info/
+
+# RAG vector store (local data, regenerated per environment)
+rag/chroma_store/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS files
+.DS_Store
+Thumbs.db
