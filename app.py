@@ -45,18 +45,32 @@ import streamlit as st
 # exact same codebase runs unchanged whether it's on your local machine
 # or deployed — nothing below this block needs to know which environment
 # it's in.
-if not os.path.exists("google-ads.yaml") and "google_ads" in st.secrets:
-    ga = st.secrets["google_ads"]
-    with open("google-ads.yaml", "w") as f:
-        f.write(f"""developer_token: "{ga['developer_token']}"
+#
+# NOTE: if no secrets have been configured at all yet (e.g. right after
+# first deploying, before adding them in the app's Settings), accessing
+# st.secrets raises StreamlitSecretNotFoundError rather than behaving
+# like an empty dict — so this is wrapped in a try/except to fail
+# gracefully with a clear message instead of a confusing traceback.
+try:
+    if not os.path.exists("google-ads.yaml") and "google_ads" in st.secrets:
+        ga = st.secrets["google_ads"]
+        with open("google-ads.yaml", "w") as f:
+            f.write(f"""developer_token: "{ga['developer_token']}"
 client_id: "{ga['client_id']}"
 client_secret: "{ga['client_secret']}"
 refresh_token: "{ga['refresh_token']}"
 login_customer_id: "{ga['login_customer_id']}"
+use_proto_plus: True
 """)
 
-if "OPENAI_API_KEY" not in os.environ and "OPENAI_API_KEY" in st.secrets:
-    os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+    if "OPENAI_API_KEY" not in os.environ and "OPENAI_API_KEY" in st.secrets:
+        os.environ["OPENAI_API_KEY"] = st.secrets["OPENAI_API_KEY"]
+except Exception:
+    # No secrets configured yet — only a problem once the user actually
+    # tries to run an analysis, so don't crash the whole app on load.
+    # The relevant functions will raise their own clear errors (e.g.
+    # "OPENAI_API_KEY environment variable not set") when actually called.
+    pass
 
 from google_ads.campaign_data import get_campaign_data_with_comparison
 from google_ads.ad_data import get_ad_data
