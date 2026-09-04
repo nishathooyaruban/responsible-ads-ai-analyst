@@ -104,10 +104,10 @@ PERIOD_LABELS = {
 
 with st.sidebar:
     st.header("Account details")
-    customer_id = st.text_input("Customer ID", placeholder="e.g. 6485531233")
+    customer_id = st.text_input("Customer ID", placeholder="Enter your Google Ads Customer ID")
     campaign_id = st.text_input(
         "Campaign ID (optional — scopes the entire analysis to one campaign)",
-        placeholder="e.g. 18731997084",
+        placeholder="Enter a Campaign ID (optional)",
         help="Leave blank to analyze all live campaigns in the account. "
              "Enter a Campaign ID to scope the campaign overview, ads, "
              "search terms, and segment breakdowns to just that one campaign.",
