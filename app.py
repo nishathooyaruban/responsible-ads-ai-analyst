@@ -264,12 +264,27 @@ if run_button:
     if search_term_findings:
         st.divider()
         st_summary = search_term_findings["search_term_summary"]
-        wasted_terms_count = len(search_term_findings.get("wasted_search_terms", []))
-        wasted_total = sum(t["cost"] for t in search_term_findings.get("wasted_search_terms", []))
+        wasted_terms = search_term_findings.get("wasted_search_terms", [])
+        wasted_terms_count = len(wasted_terms)
+        wasted_total = sum(t["cost"] for t in wasted_terms)
         col1, col2, col3 = st.columns(3)
         col1.metric("Search terms analyzed", st_summary["total_search_terms"])
         col2.metric("Wasted search terms", wasted_terms_count)
         col3.metric("Wasted spend (search terms)", f"{round(wasted_total, 2):,}")
+
+        if wasted_terms:
+            st.markdown("**Wasted search terms** — spent money with zero conversions:")
+            wasted_table = [
+                {
+                    "Search term": t["search_term"],
+                    "Matched keyword": t["matched_keyword"],
+                    "Match type": t["match_type"],
+                    "Cost": t["cost"],
+                    "Clicks": t["clicks"],
+                }
+                for t in wasted_terms
+            ]
+            st.dataframe(wasted_table, use_container_width=True, hide_index=True)
 
     if segment_findings:
         st.divider()
