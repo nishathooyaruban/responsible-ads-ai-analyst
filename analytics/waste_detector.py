@@ -33,6 +33,50 @@ ZERO_ACTIVITY_IMPRESSION_THRESHOLD = 0
 SIGNIFICANT_CHANGE_PCT = 30.0         # flag period-over-period swings of this size or more
 
 
+def account_period_comparison(campaigns: List[Dict]) -> Dict:
+    """
+    Aggregates each campaign's previous-period figures (added by
+    google_ads.campaign_data.get_campaign_data_with_comparison()) into
+    ONE account-wide current-vs-previous comparison — e.g. "leads
+    increased 24% while CPA decreased 17%" for the whole account, not
+    just one campaign.
+
+    Returns None for any field where the underlying data doesn't support
+    a comparison (e.g. no previous-period data at all), rather than a
+    misleading 0% or a divide-by-zero.
+    """
+    total_current_cost = sum(c["cost"] for c in campaigns)
+    total_current_conversions = sum(c["conversions"] for c in campaigns)
+
+    # Only sum previous-period figures for campaigns that actually HAD
+    # previous-period data (previous_cost is not None) — a brand new
+    # campaign with no prior period shouldn't silently count as 0 and
+    # skew the account-wide percentage change.
+    campaigns_with_history = [c for c in campaigns if c.get("previous_cost") is not None]
+    total_previous_cost = sum(c["previous_cost"] for c in campaigns_with_history)
+    total_previous_conversions = sum(c["previous_conversions"] for c in campaigns_with_history)
+
+    def pct_change(old, new):
+        if old is None or old == 0:
+            return None
+        return round(((new - old) / old) * 100, 1)
+
+    current_cpa = (total_current_cost / total_current_conversions) if total_current_conversions else None
+    previous_cpa = (total_previous_cost / total_previous_conversions) if total_previous_conversions else None
+
+    return {
+        "current_total_cost": round(total_current_cost, 2),
+        "current_total_conversions": round(total_current_conversions, 2),
+        "current_cpa": round(current_cpa, 2) if current_cpa is not None else None,
+        "previous_total_cost": round(total_previous_cost, 2) if campaigns_with_history else None,
+        "previous_total_conversions": round(total_previous_conversions, 2) if campaigns_with_history else None,
+        "previous_cpa": round(previous_cpa, 2) if previous_cpa is not None else None,
+        "conversions_change_pct": pct_change(total_previous_conversions, total_current_conversions) if campaigns_with_history else None,
+        "cost_change_pct": pct_change(total_previous_cost, total_current_cost) if campaigns_with_history else None,
+        "cpa_change_pct": pct_change(previous_cpa, current_cpa) if (previous_cpa is not None and current_cpa is not None) else None,
+    }
+
+
 def account_summary(campaigns: List[Dict]) -> Dict:
     """
     Account-wide totals — kept for overall context (total spend, total
@@ -198,6 +242,7 @@ def build_findings(campaigns: List[Dict]) -> Dict:
     summary = account_summary(campaigns)
     return {
         "account_summary": summary,
+        "account_period_comparison": account_period_comparison(campaigns),
         "wasted_spend": find_wasted_spend(campaigns),
         "over_target_cpa_campaigns": find_over_target_cpa_campaigns(campaigns),
         "under_target_cpa_campaigns": find_under_target_cpa_campaigns(campaigns),
@@ -211,7 +256,7 @@ if __name__ == "__main__":
     import json
     from google_ads.campaign_data import get_campaign_data_with_comparison
 
-    CUSTOMER_ID = "6485531233"
+    CUSTOMER_ID = "YOUR_CUSTOMER_ID"
 
     campaigns = get_campaign_data_with_comparison(CUSTOMER_ID, period="last_28_days")
     findings = build_findings(campaigns)

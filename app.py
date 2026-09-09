@@ -238,6 +238,41 @@ if run_button:
         combined_findings_for_check["past_reports"] = past_reports_used
     groundedness_result = check_groundedness(report, combined_findings_for_check)
 
+    # Store everything in session_state so it survives the rerun triggered
+    # by clicking the "Generate client-friendly report" button further
+    # down — Streamlit reruns the whole script on every widget interaction,
+    # and run_button itself resets to False on that rerun, so anything
+    # only held in local variables here would otherwise be lost.
+    st.session_state["analysis"] = {
+        "customer_id": customer_id,
+        "period_key": period_key,
+        "show_comparison": show_comparison,
+        "campaign_findings": campaign_findings,
+        "ad_findings": ad_findings,
+        "search_term_findings": search_term_findings,
+        "segment_findings": segment_findings,
+        "report": report,
+        "past_reports_used": past_reports_used,
+        "combined_findings_for_check": combined_findings_for_check,
+        "groundedness_result": groundedness_result,
+    }
+    # A fresh "Run analysis" click should always show a fresh client
+    # report button, not a stale client report from a previous run.
+    st.session_state.pop("client_report", None)
+
+if "analysis" in st.session_state:
+    a = st.session_state["analysis"]
+    customer_id = a["customer_id"]
+    period_key = a["period_key"]
+    show_comparison = a["show_comparison"]
+    campaign_findings = a["campaign_findings"]
+    ad_findings = a["ad_findings"]
+    search_term_findings = a["search_term_findings"]
+    segment_findings = a["segment_findings"]
+    report = a["report"]
+    combined_findings_for_check = a["combined_findings_for_check"]
+    groundedness_result = a["groundedness_result"]
+
     if groundedness_result["is_grounded"]:
         st.success(
             f"✓ Groundedness check passed — all {groundedness_result['checked_numbers']} "
@@ -295,11 +330,55 @@ if run_button:
         st.json(combined_findings_for_check)
 
     st.download_button(
-        label="Download report (Markdown)",
+        label="Download technical report (Markdown)",
         data=report,
         file_name=f"ads_report_{customer_id}_{period_key}.md",
         mime="text/markdown",
     )
+
+    st.divider()
+    st.subheader("Client-Friendly Report")
+    st.caption(
+        "A simplified, non-technical version of this analysis — suitable to send "
+        "directly to a client. Same underlying data, same groundedness guarantees."
+    )
+    if st.button("Generate client-friendly report"):
+        with st.spinner("Writing client-friendly summary..."):
+            try:
+                from llm.client_report import generate_client_report
+
+                client_report = generate_client_report(
+                    campaign_findings=campaign_findings,
+                    ad_findings=ad_findings,
+                    search_term_findings=search_term_findings,
+                    segment_findings=segment_findings,
+                    past_reports=a["past_reports_used"],
+                )
+                st.session_state["client_report"] = client_report
+            except Exception as e:
+                st.error(f"Failed to generate client report: {e}")
+
+    if "client_report" in st.session_state:
+        client_report = st.session_state["client_report"]
+        client_groundedness = check_groundedness(client_report, combined_findings_for_check)
+        if client_groundedness["is_grounded"]:
+            st.success(
+                f"✓ Groundedness check passed — all {client_groundedness['checked_numbers']} "
+                f"cited numbers trace back to source data."
+            )
+        else:
+            st.error(
+                "⚠ Groundedness check FAILED for this client report — do not send it as-is:\n\n"
+                + ", ".join(client_groundedness["unverified_numbers"])
+            )
+
+        st.markdown(client_report)
+        st.download_button(
+            label="Download client-friendly report (Markdown)",
+            data=client_report,
+            file_name=f"client_report_{customer_id}_{period_key}.md",
+            mime="text/markdown",
+        )
 
 else:
     st.info("Enter a Customer ID in the sidebar, choose a time period, and click **Run analysis** to begin.")
