@@ -26,6 +26,17 @@ real PPC review feedback:
    data, this supports named periods (last 7/14/28 days, last 3/6 months)
    and can also fetch the immediately preceding period of the same length,
    so callers can compute period-over-period change.
+
+3. ACCOUNT CURRENCY: Google Ads accounts have ONE fixed currency
+   configured for the whole account (e.g. USD) — every cost figure the
+   API returns is already in that currency, regardless of which country
+   a campaign targets. A campaign named "United Kingdom" does NOT mean
+   its numbers are in GBP; they're in whatever currency the account
+   itself is set to. Without this, the LLM analyst has no way to know
+   the currency and may incorrectly infer one from a campaign's name
+   (e.g. writing "£" for a UK-targeted campaign in a USD account) —
+   get_account_currency() fetches the real value so the report can state
+   it explicitly instead of guessing.
 """
 
 from datetime import date, timedelta
@@ -210,10 +221,111 @@ def get_campaign_data_with_comparison(
     return merged
 
 
+def get_daily_trend(
+    customer_id: str,
+    campaign_id: str = None,
+    enabled_only: bool = True,
+    period: str = "last_28_days",
+):
+    """
+    Fetches DAY-BY-DAY performance (not just period totals) for the
+    current period AND the immediately preceding period of equal length —
+    the data needed for a "this period vs last period" trend chart, where
+    each period's days are aligned by "day 1, day 2, ..." rather than by
+    actual calendar date (so a Monday in this period lines up with the
+    equivalent day of the previous period, regardless of what the actual
+    dates were).
+
+    Returns a dict:
+        {
+            "current": [{"day_index": 0, "date": "...", "impressions": ...,
+                         "clicks": ..., "cost": ..., "conversions": ...,
+                         "cost_per_conversion": ...}, ...],
+            "previous": [... same shape ...],
+        }
+    Aggregated across campaigns if campaign_id is None (whole account);
+    scoped to one campaign otherwise.
+    """
+    client = GoogleAdsClient.load_from_storage("google-ads.yaml")
+    service = client.get_service("GoogleAdsService")
+
+    def fetch_period(offset_periods: int):
+        start_date, end_date = _date_range_for_period(period, offset_periods)
+        status_filter = "campaign.status = 'ENABLED'" if enabled_only else "campaign.status != 'REMOVED'"
+        campaign_filter = f"AND campaign.id = {campaign_id}" if campaign_id else ""
+
+        query = f"""
+            SELECT
+                segments.date,
+                metrics.impressions,
+                metrics.clicks,
+                metrics.cost_micros,
+                metrics.conversions
+            FROM campaign
+            WHERE {status_filter}
+                AND segments.date BETWEEN '{start_date}' AND '{end_date}'
+                {campaign_filter}
+        """
+        response = service.search(customer_id=customer_id, query=query)
+
+        # Aggregate by date first (a query with no campaign_id returns
+        # one row per campaign per date — sum them into one row per date
+        # to get a true account-wide daily trend).
+        by_date = {}
+        for row in response:
+            d = row.segments.date
+            if d not in by_date:
+                by_date[d] = {"impressions": 0, "clicks": 0, "cost": 0.0, "conversions": 0.0}
+            by_date[d]["impressions"] += row.metrics.impressions
+            by_date[d]["clicks"] += row.metrics.clicks
+            by_date[d]["cost"] += row.metrics.cost_micros / 1_000_000
+            by_date[d]["conversions"] += row.metrics.conversions
+
+        sorted_dates = sorted(by_date.keys())
+        daily = []
+        for i, d in enumerate(sorted_dates):
+            vals = by_date[d]
+            cost_per_conv = (vals["cost"] / vals["conversions"]) if vals["conversions"] else None
+            daily.append({
+                "day_index": i,
+                "date": d,
+                "impressions": vals["impressions"],
+                "clicks": vals["clicks"],
+                "cost": round(vals["cost"], 2),
+                "conversions": round(vals["conversions"], 2),
+                "cost_per_conversion": round(cost_per_conv, 2) if cost_per_conv is not None else None,
+            })
+        return daily
+
+    return {
+        "current": fetch_period(offset_periods=0),
+        "previous": fetch_period(offset_periods=1),
+    }
+
+
+def get_account_currency(customer_id: str) -> str:
+    """
+    Returns the account's actual configured currency code (e.g. "USD",
+    "GBP", "AED") — a single, fixed setting for the whole account, NOT
+    something that varies by campaign or targeted country. All cost
+    figures returned elsewhere in this module are already in this
+    currency.
+    """
+    client = GoogleAdsClient.load_from_storage("google-ads.yaml")
+    service = client.get_service("GoogleAdsService")
+
+    query = "SELECT customer.currency_code FROM customer LIMIT 1"
+    response = service.search(customer_id=customer_id, query=query)
+
+    for row in response:
+        return row.customer.currency_code
+    return "UNKNOWN"
+
+
 if __name__ == "__main__":
     import json
 
-    CUSTOMER_ID = "6485531233"
+    CUSTOMER_ID = "YOUR_CUSTOMER_ID"
 
     print("=== Current period (last_28_days) with comparison to previous period ===")
     data = get_campaign_data_with_comparison(CUSTOMER_ID, period="last_28_days")

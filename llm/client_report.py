@@ -87,6 +87,15 @@ higher-performing UAE Leads campaign"), never specific bid amounts,
 budget figures, or percentages that are not already in FINDINGS.
 
 STRICT RULES (same as the technical report):
+- CURRENCY: FINDINGS may include an "account_currency" field (e.g. "USD",
+  "GBP", "AED") — this is the ONE fixed currency for the entire account,
+  and every cost figure is already in it, regardless of which country
+  a campaign name mentions (a campaign named "United Kingdom" in a USD
+  account still reports costs in USD, not GBP). Mention the currency
+  once near the start if account_currency is present, and use it
+  consistently. NEVER guess a currency from a campaign or country name.
+  If account_currency is absent, state figures as plain numbers with no
+  currency symbol.
 - Never state a number, statistic, or metric not present in FINDINGS.
 - Never use a raw JSON field name (like "over_target_cpa_campaigns") —
   always describe it in plain English.

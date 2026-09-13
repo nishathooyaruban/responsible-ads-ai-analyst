@@ -30,6 +30,7 @@ Run with:
 
 import os
 import streamlit as st
+import matplotlib.pyplot as plt
 
 # --- Secrets bootstrap for cloud deployment ---
 # Locally, google-ads.yaml is a real file on disk (never committed to
@@ -72,7 +73,7 @@ except Exception:
     # "OPENAI_API_KEY environment variable not set") when actually called.
     pass
 
-from google_ads.campaign_data import get_campaign_data_with_comparison
+from google_ads.campaign_data import get_campaign_data_with_comparison, get_account_currency, get_daily_trend
 from google_ads.ad_data import get_ad_data
 from google_ads.search_term_data import get_search_term_data
 from google_ads.segment_data import (
@@ -165,6 +166,27 @@ if run_button:
 
     campaign_findings = build_findings(campaigns)
 
+    try:
+        campaign_findings["account_currency"] = get_account_currency(customer_id)
+    except Exception:
+        # Non-critical — if this fails for any reason, the report will
+        # simply present figures without a currency label rather than
+        # guessing one, per the prompt's explicit fallback rule.
+        pass
+
+    daily_trend = None
+    if show_comparison:
+        with st.spinner("Pulling daily trend data..."):
+            try:
+                daily_trend = get_daily_trend(
+                    customer_id,
+                    campaign_id=campaign_id if campaign_id else None,
+                    enabled_only=live_only,
+                    period=period_key,
+                )
+            except Exception as e:
+                st.warning(f"Daily trend data could not be fetched, continuing without it: {e}")
+
     if not show_comparison:
         campaign_findings.pop("significant_period_changes", None)
 
@@ -251,6 +273,7 @@ if run_button:
         "ad_findings": ad_findings,
         "search_term_findings": search_term_findings,
         "segment_findings": segment_findings,
+        "daily_trend": daily_trend,
         "report": report,
         "past_reports_used": past_reports_used,
         "combined_findings_for_check": combined_findings_for_check,
@@ -269,6 +292,7 @@ if "analysis" in st.session_state:
     ad_findings = a["ad_findings"]
     search_term_findings = a["search_term_findings"]
     segment_findings = a["segment_findings"]
+    daily_trend = a.get("daily_trend")
     report = a["report"]
     combined_findings_for_check = a["combined_findings_for_check"]
     groundedness_result = a["groundedness_result"]
@@ -323,8 +347,113 @@ if "analysis" in st.session_state:
         col2.metric("Best city (by CPA)", best_city["city"] if best_city else "—")
         col3.metric("Best day (by CPA)", best_day["day_of_week"] if best_day else "—")
 
+    # ---------------------------------------------------------------
+    # Visual Insights — charts, in addition to the written report.
+    # Uses the same findings already computed above; no extra data
+    # pulls or LLM calls needed.
+    # ---------------------------------------------------------------
+    has_chart_data = bool(search_term_findings) or bool(segment_findings) or bool(
+        campaign_findings.get("over_target_cpa_campaigns") or campaign_findings.get("under_target_cpa_campaigns")
+    )
+    if has_chart_data or daily_trend:
+        st.divider()
+        st.subheader("Visual Insights")
+
+        # --- Line charts: this period vs. previous period, day by day ---
+        # Aligned by "day 1, day 2, ..." (day_index) rather than actual
+        # calendar date, so the two periods overlay meaningfully even
+        # though they cover different real dates.
+        if daily_trend and daily_trend.get("current"):
+            import pandas as pd
+
+            current_days = daily_trend["current"]
+            previous_days = daily_trend.get("previous", [])
+            previous_by_index = {d["day_index"]: d for d in previous_days}
+
+            trend_col1, trend_col2 = st.columns(2)
+
+            def build_trend_df(metric_key):
+                rows = []
+                for d in current_days:
+                    prev = previous_by_index.get(d["day_index"])
+                    rows.append({
+                        "Day": d["day_index"] + 1,
+                        "This period": d.get(metric_key),
+                        "Previous period": prev.get(metric_key) if prev else None,
+                    })
+                return pd.DataFrame(rows).set_index("Day")
+
+            with trend_col1:
+                st.markdown("**Conversions — this period vs. previous period**")
+                st.line_chart(build_trend_df("conversions"))
+
+            with trend_col2:
+                st.markdown("**Cost — this period vs. previous period**")
+                st.line_chart(build_trend_df("cost"))
+
+            st.markdown("**Clicks — this period vs. previous period**")
+            st.line_chart(build_trend_df("clicks"))
+
+        chart_col1, chart_col2 = st.columns(2)
+
+        # --- Pie chart: wasted search-term spend by match type ---
+        if search_term_findings:
+            match_type_data = search_term_findings.get("wasted_spend_by_match_type", [])
+            if match_type_data:
+                with chart_col1:
+                    st.markdown("**Wasted spend by keyword match type**")
+                    labels = [m["match_type"] for m in match_type_data]
+                    values = [m["wasted_cost"] for m in match_type_data]
+                    fig, ax = plt.subplots()
+                    ax.pie(values, labels=labels, autopct="%1.1f%%", startangle=90)
+                    ax.axis("equal")
+                    st.pyplot(fig)
+
+        # --- Bar chart: CPA by device ---
+        if segment_findings and segment_findings.get("device_findings"):
+            by_device = segment_findings["device_findings"].get("performance_by_device", {})
+            device_cpa = {d: v["cpa"] for d, v in by_device.items() if v.get("cpa") is not None}
+            if device_cpa:
+                with chart_col2:
+                    st.markdown("**Cost per conversion (CPA) by device**")
+                    st.bar_chart(device_cpa)
+
+        # --- Bar chart: CPA by city (top cities only) ---
+        if segment_findings and segment_findings.get("city_findings"):
+            by_city = segment_findings["city_findings"].get("performance_by_city", {})
+            city_cpa = {c: v["cpa"] for c, v in by_city.items() if v.get("cpa") is not None}
+            if city_cpa:
+                st.markdown("**Cost per conversion (CPA) by city**")
+                st.bar_chart(city_cpa)
+
+        # --- Bar chart: conversions by day of week ---
+        if segment_findings and segment_findings.get("time_findings"):
+            by_day = segment_findings["time_findings"].get("performance_by_day_of_week", {})
+            day_order = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]
+            day_conversions = {d: by_day[d]["conversions"] for d in day_order if d in by_day}
+            if day_conversions:
+                st.markdown("**Conversions by day of week**")
+                st.bar_chart(day_conversions)
+
+        # --- Bar chart: actual CPA vs target CPA, per campaign ---
+        over_target = campaign_findings.get("over_target_cpa_campaigns", [])
+        under_target = campaign_findings.get("under_target_cpa_campaigns", [])
+        all_target_campaigns = over_target + under_target
+        if all_target_campaigns:
+            st.markdown("**Actual CPA vs. target CPA, by campaign**")
+            cpa_comparison = {
+                c["campaign_name"]: {"Actual CPA": c["cost_per_conversion"], "Target CPA": c["target_cpa"]}
+                for c in all_target_campaigns
+            }
+            st.bar_chart(cpa_comparison)
+
     st.subheader("Analyst Report")
-    st.markdown(report)
+    # Streamlit's markdown renderer treats "$" as a LaTeX math delimiter
+    # by default — a report containing "$43.98" gets mangled (asterisks
+    # turn into "∗∗", spacing breaks) because Streamlit tries to render
+    # everything between two "$" signs as a math equation. Escaping the
+    # dollar sign makes it display literally instead.
+    st.markdown(report.replace("$", "\\$"))
 
     with st.expander("View raw findings data (what the LLM was given)"):
         st.json(combined_findings_for_check)
@@ -372,7 +501,7 @@ if "analysis" in st.session_state:
                 + ", ".join(client_groundedness["unverified_numbers"])
             )
 
-        st.markdown(client_report)
+        st.markdown(client_report.replace("$", "\\$"))
         st.download_button(
             label="Download client-friendly report (Markdown)",
             data=client_report,

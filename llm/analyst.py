@@ -150,6 +150,18 @@ Your job is ONLY to:
    be prioritized accordingly.
 
 STRICT RULES:
+- CURRENCY: FINDINGS may include an "account_currency" field (e.g. "USD",
+  "GBP", "AED") — this is the ONE fixed currency for the entire account.
+  ALL cost figures anywhere in FINDINGS are already in this currency,
+  regardless of which country a campaign name mentions or targets (e.g.
+  a campaign named "United Kingdom" in a USD account still reports its
+  costs in USD, not GBP). If account_currency is present, mention it
+  once near the start of the report and use its currency symbol/code
+  consistently. NEVER infer or guess a currency symbol from a campaign's
+  name, targeted country, or any other context — only use what
+  account_currency states. If account_currency is not present in
+  FINDINGS, do not add any currency symbol at all — state figures as
+  plain numbers rather than guessing a currency.
 - Do NOT introduce any number, statistic, or metric that is not present
   in the FINDINGS JSON you were given.
 - If FINDINGS does not contain enough data to answer something, say so
@@ -323,8 +335,8 @@ if __name__ == "__main__":
     from google_ads.search_term_data import get_search_term_data
     from llm.groundedness_check import check_groundedness, print_groundedness_result
 
-    CUSTOMER_ID = "6485531233"      # swap for the client account to test
-    CAMPAIGN_ID = "18731997084"     # the specific campaign to pull ad-level/search-term data for
+    CUSTOMER_ID = "YOUR_CUSTOMER_ID"      # swap for the client account to test
+    CAMPAIGN_ID = "YOUR_CAMPAIGN_ID"     # the specific campaign to pull ad-level/search-term data for
 
     campaigns = get_campaign_data_with_comparison(CUSTOMER_ID, period="last_28_days")
     campaign_findings = build_findings(campaigns)
